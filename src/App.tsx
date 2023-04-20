@@ -1,12 +1,27 @@
 import { CSSProperties, useRef, useState } from 'react';
 import problemsJSON from './problems.json';
-import { ChessBoard, Piece, getAvailableMoves } from './utils/chess';
+import {
+  ChessBoard,
+  getAvailableMoves,
+  moveToNotation,
+  notationToMove,
+  parseFEN,
+} from './utils/chess';
 import { cn } from './utils/classNames';
 import { isUpperCase } from './utils/string';
 
+type GameState = {
+  chessBoard: ChessBoard;
+  turn: 'w' | 'b';
+  castleRights: string;
+};
+
 function App() {
+  const [result, setResult] = useState<'success' | 'fail' | 'surrender'>();
   const [{ fen, solution }, setChessProblem] = useState(getRandomProblem());
-  const [{ chessBoard, turn }, setGameState] = useState(parseFEN(fen));
+  const [gameState, setGameState] = useState<GameState>(parseFEN(fen));
+
+  const { chessBoard, turn } = gameState;
 
   const squareRefs = useRef<
     {
@@ -25,49 +40,14 @@ function App() {
     offsetY: number;
   }>();
 
-  const handleClickNext = () => {
-    setChessProblem(getRandomProblem());
-    setGameState(parseFEN(fen));
-  };
-
   const canMovePiece = (row: number, col: number) => {
-    const piece = chessBoard[row][col];
-
-    return piece && (isUpperCase(piece) ? turn === 'w' : turn === 'b');
-  };
-
-  const movePiece = (
-    rowFrom: number,
-    colFrom: number,
-    rowTo: number,
-    colTo: number
-  ) => {
-    const availableMoves = getAvailableMoves(chessBoard, {
-      row: rowFrom,
-      col: colFrom,
-    });
-
-    if (!availableMoves.find((to) => to.row === rowTo && to.col === colTo)) {
+    if (result) {
       return;
     }
 
-    setGameState(({ castleRights, chessBoard, turn }) => {
-      // Create a deep copy
-      const updatedChessBoard: typeof chessBoard = JSON.parse(
-        JSON.stringify(chessBoard)
-      );
+    const piece = chessBoard[row][col];
 
-      // Move piece to destination and remove from source
-      const piece = chessBoard[rowFrom][colFrom];
-      updatedChessBoard[rowFrom][colFrom] = null;
-      updatedChessBoard[rowTo][colTo] = piece;
-
-      return {
-        castleRights,
-        chessBoard: updatedChessBoard,
-        turn: turn === 'w' ? 'b' : 'w',
-      };
-    });
+    return piece && (isUpperCase(piece) ? turn === 'w' : turn === 'b');
   };
 
   const handlePieceDragStart =
@@ -110,10 +90,21 @@ function App() {
         });
 
         setDragState((dragState) => {
-          if (dragState && square) {
-            movePiece(dragState.row, dragState.col, square.row, square.col);
+          if (!dragState || !square) {
+            return undefined;
           }
-          return undefined;
+          setGameState((gameState) => {
+            const updatedState = movePiece(gameState, dragState, square);
+            if (updatedState !== gameState) {
+              setResult(
+                moveToNotation(gameState.chessBoard, dragState, square) ===
+                  solution
+                  ? 'success'
+                  : 'fail'
+              );
+            }
+            return updatedState;
+          });
         });
       };
 
@@ -135,6 +126,30 @@ function App() {
       transform: `translate(calc(100% * ${col}), calc(100% * ${row}))`,
       cursor: canMovePiece(row, col) ? 'grab' : undefined,
     };
+  };
+
+  const handleClickNext = () => {
+    const problem = getRandomProblem();
+    setChessProblem(problem);
+    setGameState(parseFEN(problem.fen));
+    setResult(undefined);
+  };
+
+  const handleClickRetry = () => {
+    setGameState(parseFEN(fen));
+    setResult(undefined);
+  };
+
+  const handleClickGiveUp = () => {
+    setResult('surrender');
+    setGameState(() => {
+      const gameState = parseFEN(fen);
+      const move = notationToMove(gameState.chessBoard, solution);
+      if (move) {
+        return movePiece(gameState, move.from, move.to);
+      }
+      return gameState;
+    });
   };
 
   return (
@@ -180,45 +195,68 @@ function App() {
           )
         )}
       </div>
-      <div className="bottom-container">
-        <span className="solution">{solution}</span>
-        <button className="button-next" onClick={handleClickNext}>
-          Next
-        </button>
+      <div className="result-container">
+        <div
+          className={cn(
+            'result',
+            result === 'success' && 'result--success',
+            result === 'fail' && 'result--fail'
+          )}
+        >
+          {result === 'success' && 'Correct!'}
+          {result === 'fail' && 'Incorrect, try again'}
+          {result === 'surrender' && `Answer: ${solution}`}
+          {!result && (turn === 'w' ? 'White to move' : 'Black to move')}
+        </div>
+        <div className="controls-container">
+          {result !== 'success' && (
+            <button className="button" onClick={handleClickGiveUp}>
+              ?
+            </button>
+          )}
+          {result === 'fail' && (
+            <button className="button" onClick={handleClickRetry}>
+              Retry
+            </button>
+          )}
+          <button className="button" onClick={handleClickNext}>
+            Next
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function parseFEN(fen: string) {
-  const [board, turn, castleRights] = fen.split(' ');
-  const rows = board.split('/');
+function movePiece(
+  gameState: GameState,
+  from: { row: number; col: number },
+  to: { row: number; col: number }
+) {
+  const availableMoves = getAvailableMoves(gameState.chessBoard, from);
+  const isMoveAvailable = availableMoves.some(
+    (move) => move.row === to.row && move.col === to.col
+  );
 
-  let colIdx = 0;
-  let rowIdx = 0;
-  const chessBoard: ChessBoard = new Array(8)
-    .fill(undefined)
-    .map(() => new Array(8).fill(null));
-
-  for (const row of rows) {
-    for (const piece of row) {
-      const gap = parseInt(piece);
-      if (isNaN(gap)) {
-        chessBoard[rowIdx][colIdx] = piece as Piece;
-        colIdx += 1;
-      } else {
-        colIdx += gap;
-      }
-    }
-    rowIdx += 1;
-    colIdx = 0;
+  if (!isMoveAvailable) {
+    return gameState;
   }
 
+  // Create a deep copy
+  const updatedChessBoard: typeof gameState.chessBoard = JSON.parse(
+    JSON.stringify(gameState.chessBoard)
+  );
+
+  // Move piece to destination and remove from source
+  const piece = gameState.chessBoard[from.row][from.col];
+  updatedChessBoard[from.row][from.col] = null;
+  updatedChessBoard[to.row][to.col] = piece;
+
   return {
-    chessBoard,
-    turn: turn as 'w' | 'b',
-    castleRights,
-  };
+    ...gameState,
+    chessBoard: updatedChessBoard,
+    turn: gameState.turn === 'w' ? 'b' : 'w',
+  } satisfies GameState;
 }
 
 function pieceToImage(piece: string) {
