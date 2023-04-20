@@ -19,6 +19,8 @@ body {
   position: absolute;
   width: 12.5%;
   height: 12.5%;
+  cursor: grab;
+  user-select: none;
 }
 
 .chessboard {
