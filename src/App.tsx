@@ -1,10 +1,12 @@
-import { cn } from './utils';
-import problemsJSON from './problems.json';
 import { CSSProperties, useRef, useState } from 'react';
+import problemsJSON from './problems.json';
+import { ChessBoard, Piece, getAvailableMoves } from './utils/chess';
+import { cn } from './utils/classNames';
+import { isUpperCase } from './utils/string';
 
 function App() {
   const [{ fen, solution }, setChessProblem] = useState(getRandomProblem());
-  const [{ chessBoard }, setGameState] = useState(parseFEN(fen));
+  const [{ chessBoard, turn }, setGameState] = useState(parseFEN(fen));
 
   const squareRefs = useRef<
     {
@@ -28,12 +30,27 @@ function App() {
     setGameState(parseFEN(fen));
   };
 
+  const canMovePiece = (row: number, col: number) => {
+    const piece = chessBoard[row][col];
+
+    return piece && (isUpperCase(piece) ? turn === 'w' : turn === 'b');
+  };
+
   const movePiece = (
     rowFrom: number,
     colFrom: number,
     rowTo: number,
     colTo: number
   ) => {
+    const availableMoves = getAvailableMoves(chessBoard, {
+      row: rowFrom,
+      col: colFrom,
+    });
+
+    if (!availableMoves.find((to) => to.row === rowTo && to.col === colTo)) {
+      return;
+    }
+
     setGameState(({ castleRights, chessBoard, turn }) => {
       // Create a deep copy
       const updatedChessBoard: typeof chessBoard = JSON.parse(
@@ -114,7 +131,10 @@ function App() {
         cursor: 'grabbing',
       };
     }
-    return { transform: `translate(calc(100% * ${col}), calc(100% * ${row}))` };
+    return {
+      transform: `translate(calc(100% * ${col}), calc(100% * ${row}))`,
+      cursor: canMovePiece(row, col) ? 'grab' : undefined,
+    };
   };
 
   return (
@@ -150,7 +170,11 @@ function App() {
                 className="piece"
                 draggable={false}
                 style={getChessPieceStyle(rowIdx, colIdx)}
-                onMouseDown={handlePieceDragStart(rowIdx, colIdx)}
+                onMouseDown={
+                  canMovePiece(rowIdx, colIdx)
+                    ? handlePieceDragStart(rowIdx, colIdx)
+                    : undefined
+                }
               />
             ) : null
           )
@@ -172,7 +196,7 @@ function parseFEN(fen: string) {
 
   let colIdx = 0;
   let rowIdx = 0;
-  const chessBoard: (string[] | null[])[] = new Array(8)
+  const chessBoard: ChessBoard = new Array(8)
     .fill(undefined)
     .map(() => new Array(8).fill(null));
 
@@ -180,7 +204,7 @@ function parseFEN(fen: string) {
     for (const piece of row) {
       const gap = parseInt(piece);
       if (isNaN(gap)) {
-        chessBoard[rowIdx][colIdx] = piece;
+        chessBoard[rowIdx][colIdx] = piece as Piece;
         colIdx += 1;
       } else {
         colIdx += gap;

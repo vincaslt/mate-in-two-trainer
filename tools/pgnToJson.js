@@ -22,4 +22,12 @@ for (let i = 0; i < blocks.length; i += 2) {
   }
 }
 
-fs.writeFileSync('problems.json', JSON.stringify(problems, null, 2));
+// TODO: include those at some point maybe, but add support in the app
+const problemsWithoutPromotionOrCastle = problems.filter(
+  ({ solution }) => !solution.includes('=') && !solution.includes('O-O')
+);
+
+fs.writeFileSync(
+  'problems.json',
+  JSON.stringify(problemsWithoutPromotionOrCastle, null, 2)
+);
